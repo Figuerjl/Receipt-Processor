@@ -2,59 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"os"
 	"testing"
 )
 
-// Define the API type
-type API struct{}
-
-// Define the GetReceiptByID method
-func (api *API) GetReceiptByID(w http.ResponseWriter, r *http.Request) {
-	// Placeholder implementation
-}
-
-// Define the CreateReceipt method
-func (api *API) CreateReceipt(w http.ResponseWriter, r *http.Request) {
-	// Placeholder implementation
-}
-
-func TestGetReceiptByID(t *testing.T) {
-	// Create a new instance of the API
-	api := &API{}
-
-	// Create a new request
-	req, err := http.NewRequest("GET", "/receipt/123", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a new response recorder to capture the response
-	rr := httptest.NewRecorder()
-
-	// Call the GetReceiptByID method
-	api.GetReceiptByID(rr, req)
-
-	// Check the response status code
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status %d but got %d", http.StatusOK, rr.Code)
-	}
-
-	// Check the response body
-	expectedResponse := `{"Total Points":0,"Breakdown":""}` // Update with the expected response
-	if rr.Body.String() != expectedResponse {
-		t.Errorf("expected response %s but got %s", expectedResponse, rr.Body.String())
-	}
-}
-
-func TestCreateReceipt(t *testing.T) {
-	// Create a new instance of the API
-	api := &API{}
-
-	// Create a sample request body
-	requestBody := []byte(`{
+func TestProcessReceipt(t *testing.T) {
+	receiptJSON := `
+	{
 		"retailer": "Target",
 		"purchaseDate": "2022-01-01",
 		"purchaseTime": "13:01",
@@ -76,41 +32,61 @@ func TestCreateReceipt(t *testing.T) {
 				"price": 3.35
 			},
 			{
-				"shortDescription": "Klarbrunn 12-PK 12 FL OZ",
+				"shortDescription": "   Klarbrunn 12-PK 12 FL OZ  ",
 				"price": 12.00
 			}
 		],
 		"total": 35.35
-	}`)
+	}
+	`
 
-	// Create a new request
-	req, err := http.NewRequest("POST", "/receipt", bytes.NewBuffer(requestBody))
+	// Send the receipt JSON and retrieve the awarded points
+	points, err := sendReceiptAndGetPoints(receiptJSON)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("Failed to send receipt and get points:", err)
 	}
 
-	// Create a new response recorder to capture the response
-	rr := httptest.NewRecorder()
-
-	// Call the CreateReceipt method
-	api.CreateReceipt(rr, req)
-
-	// Check the response status code
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status %d but got %d", http.StatusOK, rr.Code)
-	}
-
-	// Check the response body
-	expectedResponse := `{"message":"Receipt created successfully"}` // Update with the expected response
-	if rr.Body.String() != expectedResponse {
-		t.Errorf("expected response %s but got %s", expectedResponse, rr.Body.String())
+	// Verify the awarded points
+	expectedPoints := 28
+	if points != expectedPoints {
+		t.Errorf("Expected points: %d, but got: %d", expectedPoints, points)
 	}
 }
 
-func TestMain(m *testing.M) {
-	// Run tests
-	code := m.Run()
+func sendReceiptAndGetPoints(receiptJSON string) (int, error) {
+	// Send a request to the Process Receipts endpoint
+	processReceiptURL := "http://localhost:8080/receipts/process"
+	resp, err := http.Post(processReceiptURL, "application/json", bytes.NewBuffer([]byte(receiptJSON)))
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request to Process Receipts endpoint: %v", err)
+	}
+	defer resp.Body.Close()
 
-	// Exit with the test result code
-	os.Exit(code)
+	// Parse the response JSON
+	var processResp struct {
+		ID string `json:"id"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&processResp)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse response from Process Receipts endpoint: %v", err)
+	}
+
+	// Send a request to the Get Points endpoint
+	getPointsURL := fmt.Sprintf("http://localhost:8080/receipts/%s/points", processResp.ID)
+	resp, err = http.Get(getPointsURL)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request to Get Points endpoint: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Parse the response JSON
+	var pointsResp struct {
+		Points int `json:"points"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&pointsResp)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse response from Get Points endpoint: %v", err)
+	}
+
+	return pointsResp.Points, nil
 }
