@@ -145,7 +145,14 @@ func getReceiptPointsHandler(w http.ResponseWriter, r *http.Request) {
 	id := params["id"]
 
 	// Lookup the receipt points from the database or storage
-	points, err := calculatePointsForReceiptByID(id)
+	receipt, err := findReceiptByID(id)
+
+	if err != nil {
+		http.Error(w, "Invalid receipt payload", http.StatusBadRequest)
+		return
+	}
+	// Perform the calculation based on the receipt data
+	points := calculatePointsForReceipt(receipt)
 
 	if err != nil {
 		http.Error(w, "Invalid point payload", http.StatusBadRequest)
@@ -153,7 +160,7 @@ func getReceiptPointsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	// Return the points for the receipt
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int64{"points": points})
+	json.NewEncoder(w).Encode(map[string]int{"points": points})
 }
 
 func validateReceipt(receipt *Receipt) error {
@@ -197,58 +204,13 @@ func validateReceipt(receipt *Receipt) error {
 	return nil
 }
 
-func GetReceiptByID(id string) Receipt {
-	R := Receipt{}
-	return R
-}
-func calculatePointsForReceiptByID(id string) (int64, error) {
-	// Retrieve the receipt from the database or storage based on the ID
-	receipt := GetReceiptByID(id)
-
-	// Perform the calculation based on the receipt data
-	points := int64(0)
-
-	// Calculate points based on retailer name length
-	points += int64(len(receipt.Retailer))
-
-	// Calculate points based on the number of items
-	numItems := len(receipt.Items)
-	if numItems%2 == 0 {
-		// Even number of items, award 5 points per pair
-		points += int64(numItems / 2 * 5)
-	} else {
-		// Odd number of items, award 5 points for each pair and 1 point for the odd item
-		points += int64((numItems / 2 * 5) + 1)
-	}
-
-	// Calculate points based on specific item conditions
-	for _, item := range receipt.Items {
-		// Calculate points based on item description length
-		descriptionLength := len(strings.TrimSpace(item.ShortDescription))
-		if descriptionLength%3 == 0 {
-			points += int64(descriptionLength / 3)
+func findReceiptByID(id string) (*Receipt, error) {
+	for i := range receipts {
+		if receipts[i].ID == id {
+			return &receipts[i], nil
 		}
-
-		// Calculate points based on item price
-		price, err := strconv.ParseFloat(item.Price, 64)
-		if err != nil {
-			return 0, err
-		}
-		itemPoints := math.Ceil(price * 0.2)
-		points += int64(itemPoints)
 	}
-
-	// Calculate points based on purchase date
-	purchaseDate, err := time.Parse("2006-01-02", receipt.PurchaseDate)
-	if err != nil {
-		return 0, err
-	}
-	if purchaseDate.Day()%2 != 0 {
-		// Odd day of the month, award 6 points
-		points += 6
-	}
-
-	return points, nil
+	return nil, fmt.Errorf("receipt not found")
 }
 
 func generateID() string {

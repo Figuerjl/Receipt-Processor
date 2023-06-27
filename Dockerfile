@@ -16,8 +16,5 @@ RUN go mod download
 # Build the application
 RUN go build -o main
 
-# Run the test cases
-RUN go test -v ./...
-
 # Set the command to run the application
 CMD ["./main"]

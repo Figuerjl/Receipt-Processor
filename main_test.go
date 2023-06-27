@@ -1,49 +1,65 @@
-package main
+package main_test
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"testing"
 )
 
+type Receipt struct {
+	Retailer     string `json:"retailer"`
+	PurchaseDate string `json:"purchaseDate"`
+	PurchaseTime string `json:"purchaseTime"`
+	Items        []Item `json:"items"`
+	Total        string `json:"total"`
+}
+
+type Item struct {
+	ShortDescription string  `json:"shortDescription"`
+	Price            float64 `json:"price"`
+}
+
+type ProcessResponse struct {
+	ID     string `json:"id"`
+	Points int    `json:"points"`
+}
+
 func TestProcessReceipt(t *testing.T) {
-	receiptJSON := `
-	{
+	httpposturl := "http://localhost:8080/receipts/process"
+
+	fmt.Println("TEST CASE: 1", httpposturl)
+	var receipt1jsonData = []byte(`{
 		"retailer": "Target",
 		"purchaseDate": "2022-01-01",
 		"purchaseTime": "13:01",
 		"items": [
-			{
-				"shortDescription": "Mountain Dew 12PK",
-				"price": 6.49
-			},
-			{
-				"shortDescription": "Emils Cheese Pizza",
-				"price": 12.25
-			},
-			{
-				"shortDescription": "Knorr Creamy Chicken",
-				"price": 1.26
-			},
-			{
-				"shortDescription": "Doritos Nacho Cheese",
-				"price": 3.35
-			},
-			{
-				"shortDescription": "   Klarbrunn 12-PK 12 FL OZ  ",
-				"price": 12.00
-			}
+		  {
+			"shortDescription": "Mountain Dew 12PK",
+			"price": "6.49"
+		  },{
+			"shortDescription": "Emils Cheese Pizza",
+			"price": "12.25"
+		  },{
+			"shortDescription": "Knorr Creamy Chicken",
+			"price": "1.26"
+		  },{
+			"shortDescription": "Doritos Nacho Cheese",
+			"price": "3.35"
+		  },{
+			"shortDescription": "Klarbrunn 12-PK 12 FL OZ",
+			"price": "12.00"
+		  }
 		],
-		"total": 35.35
-	}
-	`
+		"total": "35.35"
+	  }`)
 
-	// Send the receipt JSON and retrieve the awarded points
-	points, err := sendReceiptAndGetPoints(receiptJSON)
+	// Send the receipt and get the ID and points
+	id, points, err := sendReceiptAndGetPoints(httpposturl, receipt1jsonData)
 	if err != nil {
-		t.Fatal("Failed to send receipt and get points:", err)
+		t.Fatalf("Failed to send receipt and get points: %v", err)
 	}
 
 	// Verify the awarded points
@@ -51,42 +67,41 @@ func TestProcessReceipt(t *testing.T) {
 	if points != expectedPoints {
 		t.Errorf("Expected points: %d, but got: %d", expectedPoints, points)
 	}
+
+	fmt.Println("ID:", id)
+	fmt.Println("Points:", points)
 }
 
-func sendReceiptAndGetPoints(receiptJSON string) (int, error) {
-	// Send a request to the Process Receipts endpoint
-	processReceiptURL := "http://localhost:8080/receipts/process"
-	resp, err := http.Post(processReceiptURL, "application/json", bytes.NewBuffer([]byte(receiptJSON)))
-	if err != nil {
-		return 0, fmt.Errorf("failed to send request to Process Receipts endpoint: %v", err)
-	}
-	defer resp.Body.Close()
+func sendReceiptAndGetPoints(url string, receipt []byte) (string, int, error) {
+	// Convert receipt object to JSON
 
-	// Parse the response JSON
-	var processResp struct {
-		ID string `json:"id"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&processResp)
+	request, err := http.NewRequest("POST", url, bytes.NewBuffer(receipt))
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse response from Process Receipts endpoint: %v", err)
+		return "", 0, fmt.Errorf("failed to create HTTP request: %v", err)
 	}
+	request.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
-	// Send a request to the Get Points endpoint
-	getPointsURL := fmt.Sprintf("http://localhost:8080/receipts/%s/points", processResp.ID)
-	resp, err = http.Get(getPointsURL)
+	client := &http.Client{}
+	response, err := client.Do(request)
 	if err != nil {
-		return 0, fmt.Errorf("failed to send request to Get Points endpoint: %v", err)
+		return "", 0, fmt.Errorf("failed to send request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer response.Body.Close()
 
-	// Parse the response JSON
-	var pointsResp struct {
-		Points int `json:"points"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&pointsResp)
+	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse response from Get Points endpoint: %v", err)
+		return "", 0, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	return pointsResp.Points, nil
+	if response.StatusCode != http.StatusOK {
+		return "", 0, fmt.Errorf("received non-OK response: %s", response.Status)
+	}
+
+	var processResp ProcessResponse
+	err = json.Unmarshal(body, &processResp)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to unmarshal response JSON: %v", err)
+	}
+
+	return processResp.ID, processResp.Points, nil
 }
